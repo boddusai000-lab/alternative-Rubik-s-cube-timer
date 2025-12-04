@@ -1,0 +1,826 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SpeedCube Timer</title>
+    <!-- Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    
+    <style>
+        /* Custom Scrollbar */
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: rgba(30, 41, 59, 0.5);
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: rgba(71, 85, 105, 0.8);
+            border-radius: 3px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: rgba(100, 116, 139, 1);
+        }
+        
+        /* Prevent text selection during rapid spacebar spamming */
+        body {
+            user-select: none;
+            -webkit-user-select: none;
+            outline: none; /* Remove focus outline */
+        }
+
+        /* Hide number input spinners */
+        input[type=number]::-webkit-inner-spin-button, 
+        input[type=number]::-webkit-outer-spin-button { 
+            -webkit-appearance: none; 
+            margin: 0; 
+        }
+    </style>
+</head>
+<body class="min-h-screen bg-slate-900 text-slate-200 font-sans flex flex-col items-center overflow-hidden" tabindex="0">
+
+    <!-- FOCUS OVERLAY -->
+    <div id="focusOverlay" class="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[100] flex flex-col items-center justify-center cursor-pointer transition-opacity duration-200" onclick="gainFocus()">
+        <div class="bg-slate-800 p-6 rounded-xl border border-slate-600 shadow-2xl text-center transform hover:scale-105 transition-transform">
+            <i data-lucide="mouse-pointer-click" class="mx-auto mb-4 text-blue-400" width="48" height="48"></i>
+            <h2 class="text-2xl font-bold text-white mb-2">Click to Enable Timer</h2>
+            <p class="text-slate-400">Clicking here helps the browser detect your keys.</p>
+        </div>
+    </div>
+
+    <!-- TOP BAR: SCRAMBLE -->
+    <div class="w-full max-w-4xl p-6 flex justify-between items-start z-10 no-timer-trigger">
+        <div class="flex-1"></div>
+        <div class="flex-grow text-center mx-4">
+            <h2 id="scrambleDisplay" class="text-xl md:text-3xl font-medium tracking-wider leading-relaxed text-slate-100 font-mono break-words cursor-pointer" onclick="alert(this.textContent)">
+                Loading...
+            </h2>
+            <div class="mt-2 flex justify-center gap-4 text-xs md:text-sm text-slate-500">
+                <button onclick="generateNewScramble()" class="flex items-center gap-1 hover:text-slate-300 transition-colors">
+                    <i data-lucide="rotate-ccw" width="14"></i> Next Scramble
+                </button>
+            </div>
+        </div>
+        <div class="flex-1 flex justify-end">
+            <button onclick="toggleSettings(true)" class="p-2 hover:bg-slate-800 rounded-full transition-colors text-slate-400 hover:text-slate-200">
+                <i data-lucide="settings" width="20"></i>
+            </button>
+        </div>
+    </div>
+
+    <!-- MAIN TIMER DISPLAY Area -->
+    <div class="flex-grow flex flex-col items-center justify-center w-full relative cursor-pointer" id="touchZone">
+        
+        <!-- Standard Timer Display -->
+        <div id="mainTimer" class="font-mono font-bold transition-colors duration-100 select-none text-slate-200" 
+             style="font-size: clamp(5rem, 20vw, 14rem); line-height: 1;">
+            0.00
+        </div>
+
+        <!-- Typing Input (Hidden by default) -->
+        <input type="number" id="typingInput" 
+            class="hidden bg-transparent border-b-4 border-slate-700 text-slate-200 font-mono font-bold text-center focus:outline-none focus:border-slate-500 transition-colors"
+            style="font-size: clamp(4rem, 15vw, 10rem); width: 80%;"
+            placeholder="0.00" step="0.01"
+            onkeydown="handleTypingKey(event)"
+        >
+
+        <!-- Status Badges -->
+        <div class="flex gap-2 mt-4">
+            <span id="inspectionBadge" class="hidden text-xs font-bold px-2 py-1 rounded bg-slate-800 text-slate-600">
+                INSPECTION
+            </span>
+            <span id="btBadge" class="hidden text-xs font-bold px-2 py-1 rounded flex items-center gap-1 bg-slate-800 text-slate-600">
+                <i data-lucide="bluetooth" width="10"></i> <span id="btStatusText">BT READY</span>
+            </span>
+            <span id="typingBadge" class="hidden text-xs font-bold px-2 py-1 rounded bg-slate-800 text-slate-600">
+                TYPING MODE
+            </span>
+        </div>
+
+        <!-- Float Stats (Visible only when idle) -->
+        <div id="floatStats" class="absolute bottom-10 flex gap-8 text-slate-400 opacity-0 transition-opacity duration-300">
+            <div class="text-center">
+                <div class="text-xs uppercase tracking-widest mb-1 text-slate-600">ao5</div>
+                <div id="floatAo5" class="text-2xl font-mono text-slate-200">-.--</div>
+            </div>
+            <div class="text-center">
+                <div class="text-xs uppercase tracking-widest mb-1 text-slate-600">ao12</div>
+                <div id="floatAo12" class="text-2xl font-mono text-slate-200">-.--</div>
+            </div>
+        </div>
+
+        <!-- POST SOLVE ACTION PANEL (Floating Right) -->
+        <div id="postSolvePanel" class="hidden absolute right-4 top-1/2 -translate-y-1/2 flex-col gap-2 bg-slate-800 p-2 rounded-lg shadow-xl border border-slate-700 z-30 transition-all">
+            <button onclick="togglePenalty('plus2')" id="btnPlus2" class="w-12 h-12 rounded flex items-center justify-center font-bold text-slate-400 hover:bg-slate-700 hover:text-yellow-400 transition-colors">
+                +2
+            </button>
+            <button onclick="togglePenalty('dnf')" id="btnDNF" class="w-12 h-12 rounded flex items-center justify-center font-bold text-slate-400 hover:bg-slate-700 hover:text-red-500 transition-colors">
+                DNF
+            </button>
+            <div class="h-px bg-slate-700 my-1"></div>
+            <button onclick="deleteLastSolve()" class="w-12 h-12 rounded flex items-center justify-center text-slate-400 hover:bg-red-900/50 hover:text-red-400 transition-colors">
+                <i data-lucide="trash-2" width="20"></i>
+            </button>
+        </div>
+
+    </div>
+
+    <!-- BOTTOM PANEL -->
+    <div class="w-full bg-slate-800/50 border-t border-slate-700 backdrop-blur-sm h-64 md:h-48 flex flex-col md:flex-row no-timer-trigger z-20">
+        <!-- Stats Left -->
+        <div class="flex-1 p-6 border-b md:border-b-0 md:border-r border-slate-700 flex flex-col justify-between">
+            <div>
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="text-sm font-bold uppercase tracking-widest text-slate-500 flex items-center gap-2">
+                        <i data-lucide="trophy" width="14"></i> Session Stats
+                    </h3>
+                    <span id="solveCount" class="text-xs bg-slate-700 px-2 py-1 rounded-full">0 Solves</span>
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <span class="text-xs text-slate-500 block">Best</span>
+                        <span id="statBest" class="text-xl font-mono">0.00</span>
+                    </div>
+                    <div>
+                        <span class="text-xs text-slate-500 block">Mean</span>
+                        <span id="statMean" class="text-xl font-mono">0.00</span>
+                    </div>
+                </div>
+            </div>
+            <button onclick="clearSession()" class="mt-4 text-xs text-red-400 hover:text-red-300 flex items-center gap-2 w-max transition-colors">
+                <i data-lucide="trash-2" width="12"></i> Reset Session
+            </button>
+        </div>
+
+        <!-- History Right -->
+        <div class="flex-[2] p-4 overflow-hidden flex flex-col">
+            <h3 class="text-sm font-bold uppercase tracking-widest text-slate-500 mb-2 flex items-center gap-2">
+                <i data-lucide="history" width="14"></i> History
+            </h3>
+            <div class="flex-grow overflow-y-auto pr-2 custom-scrollbar">
+                <div id="historyList" class="flex flex-wrap content-start gap-2">
+                    <div class="w-full text-center py-8 text-slate-600 italic">No solves yet.</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- SETTINGS MODAL -->
+    <div id="settingsModal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" onclick="toggleSettings(false)">
+        <div class="bg-slate-800 border border-slate-700 rounded-lg shadow-2xl w-full max-w-md overflow-hidden" onclick="event.stopPropagation()">
+            <div class="flex justify-between items-center p-4 border-b border-slate-700 bg-slate-800/50">
+                <h3 class="font-bold text-lg flex items-center gap-2">
+                    <i data-lucide="settings" width="18"></i> Settings
+                </h3>
+                <button onclick="toggleSettings(false)" class="text-slate-400 hover:text-white">
+                    <i data-lucide="x" width="20"></i>
+                </button>
+            </div>
+            <div class="p-6 space-y-6">
+                <!-- Inspection -->
+                <div class="flex items-center justify-between">
+                    <div>
+                        <div class="font-medium text-slate-200">Inspection Time</div>
+                        <div class="text-xs text-slate-500">Enable 15s WCA countdown</div>
+                    </div>
+                    <button onclick="toggleInspection()" id="btnInspection" class="w-12 h-6 rounded-full relative transition-colors bg-slate-600">
+                        <div class="absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-all"></div>
+                    </button>
+                </div>
+
+                <!-- Timing Method Dropdown -->
+                <div class="space-y-2">
+                    <div class="font-medium text-slate-200">Timing Method</div>
+                    <select id="timingMethodSelect" onchange="changeTimingMethod(this.value)" class="w-full bg-slate-900 border border-slate-700 rounded p-2 text-slate-200 focus:outline-none focus:border-blue-500">
+                        <option value="spacebar">Spacebar (Hold to Start)</option>
+                        <option value="typing">Typing (Manual Entry)</option>
+                        <option value="bluetooth">Bluetooth Timer</option>
+                    </select>
+                </div>
+
+                 <!-- Bluetooth Connection Area (Conditional) -->
+                 <div id="btConnectionArea" class="hidden bg-slate-900/50 p-4 rounded border border-slate-700/50">
+                    <div class="flex items-center justify-between mb-2">
+                        <span class="text-sm font-medium text-slate-300">Device Status</span>
+                        <span id="modalBtStatus" class="text-xs px-2 py-0.5 rounded bg-slate-700 text-slate-400">
+                            DISCONNECTED
+                        </span>
+                    </div>
+                    <button 
+                        onclick="handleBluetoothAction()"
+                        id="btnScan"
+                        class="w-full py-2 rounded text-sm font-medium flex items-center justify-center gap-2 transition-all bg-blue-600 hover:bg-blue-500 text-white"
+                    >
+                        Scan for Timer
+                    </button>
+                    <p class="text-[10px] text-slate-500 mt-2 text-center">
+                        *Requires Chrome/Edge.
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MAIN LOGIC SCRIPT -->
+    <script>
+        // --- State ---
+        let state = {
+            time: 0,
+            status: 'idle', // idle, holding, ready, running, inspection
+            scramble: '',
+            solves: [], // { id, time, rawTime, penalty: null|'plus2'|'dnf', scramble, date }
+            settings: {
+                useInspection: false,
+                timingMethod: 'spacebar' // 'spacebar', 'typing', 'bluetooth'
+            },
+            bluetooth: {
+                device: null,
+                server: null,
+                status: 'disconnected'
+            },
+            currentSolveId: null // used for post-solve panel
+        };
+
+        // --- Refs ---
+        let timerInterval = null;
+        let inspectionInterval = null;
+        let startTime = 0;
+        let holdTimeout = null;
+        const HOLD_DURATION = 350;
+        const INSPECTION_TIME = 15000;
+
+        // --- Init ---
+        window.onload = () => {
+            lucide.createIcons();
+            loadData();
+            state.scramble = generateScramble();
+            updateUI();
+            
+            checkFocus();
+        };
+
+        // --- Focus Handling ---
+        function gainFocus() {
+            const overlay = document.getElementById('focusOverlay');
+            overlay.classList.add('hidden');
+            document.body.focus();
+            window.focus();
+        }
+
+        function checkFocus() {
+            if (document.hasFocus()) {
+                gainFocus();
+            } else {
+                document.getElementById('focusOverlay').classList.remove('hidden');
+            }
+        }
+
+        window.addEventListener('focus', gainFocus);
+        window.addEventListener('blur', () => {
+            if (state.settings.timingMethod !== 'typing') {
+                document.getElementById('focusOverlay').classList.remove('hidden');
+            }
+        });
+
+        // --- Core Logic ---
+
+        function handleTimerStartSignal() {
+             // Logic to handle MouseDown or SpaceDown
+            if (document.getElementById('settingsModal').classList.contains('flex')) return;
+            if (state.settings.timingMethod !== 'spacebar' && state.settings.timingMethod !== 'bluetooth') return;
+
+            if (state.status === 'running') {
+                stopTimer();
+            } else if (state.status === 'idle') {
+                if (!state.settings.useInspection) {
+                    startHolding();
+                }
+            } else if (state.status === 'inspection') {
+                startHolding();
+            }
+        }
+
+        function handleTimerStopSignal() {
+            // Logic to handle MouseUp or SpaceUp
+            if (document.getElementById('settingsModal').classList.contains('flex')) return;
+            if (state.settings.timingMethod !== 'spacebar' && state.settings.timingMethod !== 'bluetooth') return;
+
+            if (state.status === 'holding') {
+                clearTimeout(holdTimeout);
+                if (state.settings.useInspection) {
+                    state.status = 'inspection';
+                    updateTimerColor('orange');
+                } else {
+                    state.status = 'idle';
+                    updateTimerColor('default');
+                }
+            } else if (state.status === 'ready') {
+                startTimer();
+            } else if (state.status === 'idle' && state.settings.useInspection) {
+                startInspection();
+            }
+        }
+
+        function startHolding() {
+            state.status = 'holding';
+            updateTimerDisplay(0);
+            updateTimerColor('red');
+            document.getElementById('postSolvePanel').classList.add('hidden');
+            document.getElementById('postSolvePanel').classList.remove('flex');
+            
+            holdTimeout = setTimeout(() => {
+                if (state.status === 'holding') {
+                    state.status = 'ready';
+                    updateTimerColor('green');
+                }
+            }, HOLD_DURATION);
+        }
+
+        function startTimer() {
+            state.status = 'running';
+            updateTimerColor('default');
+            clearInterval(inspectionInterval);
+            
+            startTime = Date.now();
+            timerInterval = setInterval(() => {
+                const now = Date.now();
+                state.time = now - startTime;
+                updateTimerDisplay(state.time);
+            }, 10);
+            document.getElementById('floatStats').style.opacity = '0';
+        }
+
+        function stopTimer() {
+            clearInterval(timerInterval);
+            state.status = 'idle';
+            state.time = Date.now() - startTime;
+            saveNewSolve(state.time);
+        }
+
+        function saveNewSolve(rawTime) {
+            const solve = {
+                id: Date.now(),
+                time: rawTime,
+                rawTime: rawTime,
+                penalty: null,
+                scramble: state.scramble,
+                date: new Date().toISOString()
+            };
+            state.solves.unshift(solve);
+            state.currentSolveId = solve.id;
+            saveData();
+            
+            state.scramble = generateScramble();
+            updateUI();
+            
+            setTimeout(() => {
+                const panel = document.getElementById('postSolvePanel');
+                panel.classList.remove('hidden');
+                panel.classList.add('flex');
+                updatePostSolvePanel();
+            }, 100);
+        }
+
+        // --- Typing Mode Logic ---
+        function handleTypingKey(e) {
+            if (e.key === 'Enter') {
+                const input = document.getElementById('typingInput');
+                const val = parseFloat(input.value);
+                if (!isNaN(val) && val > 0) {
+                    const timeMs = Math.round(val * 1000);
+                    saveNewSolve(timeMs);
+                    input.value = '';
+                    input.focus(); 
+                }
+            }
+        }
+
+        // --- Inspection ---
+        function startInspection() {
+            state.status = 'inspection';
+            updateTimerColor('orange');
+            startTime = Date.now();
+            document.getElementById('postSolvePanel').classList.add('hidden');
+            document.getElementById('postSolvePanel').classList.remove('flex');
+
+            inspectionInterval = setInterval(() => {
+                const elapsed = Date.now() - startTime;
+                const remaining = INSPECTION_TIME - elapsed;
+                
+                if (remaining <= 0) {
+                    updateTimerDisplay(0);
+                } else {
+                    document.getElementById('mainTimer').textContent = Math.ceil(remaining / 1000);
+                }
+            }, 50);
+        }
+
+        // --- Penalty Logic ---
+        function togglePenalty(type) {
+            if (!state.currentSolveId) return;
+            
+            const solve = state.solves.find(s => s.id === state.currentSolveId);
+            if (!solve) return;
+
+            if (solve.penalty === type) {
+                solve.penalty = null;
+                solve.time = solve.rawTime;
+            } else {
+                solve.penalty = type;
+                if (type === 'plus2') {
+                    solve.time = solve.rawTime + 2000;
+                }
+            }
+            saveData();
+            updateUI();
+            updatePostSolvePanel();
+        }
+
+        function deleteLastSolve() {
+            if (!state.currentSolveId) return;
+            if(confirm("Delete this solve?")) {
+                state.solves = state.solves.filter(s => s.id !== state.currentSolveId);
+                state.currentSolveId = null;
+                document.getElementById('postSolvePanel').classList.add('hidden');
+                document.getElementById('postSolvePanel').classList.remove('flex');
+                saveData();
+                updateUI();
+            }
+        }
+
+        function updatePostSolvePanel() {
+            const btnP2 = document.getElementById('btnPlus2');
+            const btnDNF = document.getElementById('btnDNF');
+            const solve = state.solves.find(s => s.id === state.currentSolveId);
+            
+            if(!solve) return;
+
+            if (solve.penalty === 'plus2') {
+                btnP2.classList.replace('text-slate-400', 'text-yellow-400');
+                btnP2.classList.add('bg-slate-700');
+            } else {
+                btnP2.classList.replace('text-yellow-400', 'text-slate-400');
+                btnP2.classList.remove('bg-slate-700');
+            }
+
+            if (solve.penalty === 'dnf') {
+                btnDNF.classList.replace('text-slate-400', 'text-red-500');
+                btnDNF.classList.add('bg-slate-700');
+            } else {
+                btnDNF.classList.replace('text-red-500', 'text-slate-400');
+                btnDNF.classList.remove('bg-slate-700');
+            }
+        }
+
+        // --- Bluetooth Logic ---
+        async function handleBluetoothAction() {
+            if (state.bluetooth.status === 'connected') {
+                disconnectBluetooth();
+            } else {
+                connectBluetooth();
+            }
+        }
+
+        async function connectBluetooth() {
+            if (!navigator.bluetooth) {
+                alert("Web Bluetooth not supported.");
+                return;
+            }
+            try {
+                updateBluetoothStatus('scanning');
+                const SERVICE_UUID = '0000fff0-0000-1000-8000-00805f9b34fb'; 
+                
+                const device = await navigator.bluetooth.requestDevice({
+                    filters: [
+                        { namePrefix: 'GAN' },
+                        { namePrefix: 'Smart' },
+                        { namePrefix: 'QY' },
+                        { services: [SERVICE_UUID] }
+                    ],
+                    optionalServices: [SERVICE_UUID]
+                });
+                
+                state.bluetooth.device = device;
+                device.addEventListener('gattserverdisconnected', onDisconnected);
+                const server = await device.gatt.connect();
+                state.bluetooth.server = server;
+                updateBluetoothStatus('connected');
+            } catch (error) {
+                console.error(error);
+                updateBluetoothStatus('disconnected');
+            }
+        }
+
+        function disconnectBluetooth() {
+            if (state.bluetooth.device && state.bluetooth.device.gatt.connected) {
+                state.bluetooth.device.gatt.disconnect();
+            }
+            updateBluetoothStatus('disconnected');
+        }
+        function onDisconnected() { updateBluetoothStatus('disconnected'); alert("Timer disconnected."); }
+
+        function updateBluetoothStatus(status) {
+            state.bluetooth.status = status;
+            const badge = document.getElementById('modalBtStatus');
+            const btn = document.getElementById('btnScan');
+            const mainBadge = document.getElementById('btStatusText');
+            
+            if (status === 'connected') {
+                badge.textContent = 'CONNECTED'; badge.className = 'text-xs px-2 py-0.5 rounded bg-green-500/20 text-green-400';
+                btn.textContent = 'Disconnect'; btn.className = 'w-full py-2 rounded text-sm bg-red-500/10 text-red-400';
+                mainBadge.textContent = 'BT CONNECTED';
+                document.getElementById('btBadge').classList.replace('text-slate-600', 'text-blue-400');
+                document.getElementById('btBadge').classList.replace('bg-slate-800', 'bg-blue-500/20');
+            } else if (status === 'scanning') {
+                badge.textContent = 'SCANNING...'; badge.className = 'text-xs px-2 py-0.5 rounded bg-blue-500/20 text-blue-400';
+                btn.textContent = 'Scanning...';
+            } else {
+                badge.textContent = 'DISCONNECTED'; badge.className = 'text-xs px-2 py-0.5 rounded bg-slate-700 text-slate-400';
+                btn.textContent = 'Scan for Timer'; btn.className = 'w-full py-2 rounded text-sm bg-blue-600 text-white';
+                mainBadge.textContent = 'BT READY';
+                document.getElementById('btBadge').classList.replace('text-blue-400', 'text-slate-600');
+                document.getElementById('btBadge').classList.replace('bg-blue-500/20', 'bg-slate-800');
+            }
+        }
+
+        // --- DOM Updates ---
+
+        function updateUI() {
+            document.getElementById('scrambleDisplay').textContent = state.scramble;
+            renderHistory();
+            updateStats();
+            updateSettingsUI();
+            updatePostSolvePanel();
+            
+            const isTyping = state.settings.timingMethod === 'typing';
+            document.getElementById('mainTimer').classList.toggle('hidden', isTyping);
+            document.getElementById('typingInput').classList.toggle('hidden', !isTyping);
+            if (isTyping) document.getElementById('typingInput').focus();
+
+            document.getElementById('floatStats').style.opacity = (state.status === 'idle' && state.solves.length > 0) ? '1' : '0';
+        }
+
+        function updateTimerDisplay(ms) {
+            document.getElementById('mainTimer').textContent = formatTime(ms);
+        }
+
+        function updateTimerColor(colorType) {
+            const el = document.getElementById('mainTimer');
+            el.className = `font-mono font-bold transition-colors duration-100 select-none text-slate-200`; 
+            if (colorType === 'red') el.classList.add('text-red-500');
+            else if (colorType === 'green') el.classList.add('text-green-500');
+            else if (colorType === 'orange') el.classList.add('text-orange-400');
+            else el.classList.add('text-slate-200');
+        }
+
+        function renderHistory() {
+            const list = document.getElementById('historyList');
+            if (state.solves.length === 0) {
+                list.innerHTML = `<div class="w-full text-center py-8 text-slate-600 italic">No solves yet.</div>`;
+                return;
+            }
+
+            let html = '';
+            state.solves.forEach((s, idx) => {
+                const num = state.solves.length - idx;
+                
+                let displayTime = formatTime(s.time);
+                let colorClass = 'text-slate-200';
+                
+                if (s.penalty === 'plus2') {
+                    displayTime += '+';
+                    colorClass = 'text-yellow-400';
+                } else if (s.penalty === 'dnf') {
+                    displayTime = 'DNF';
+                    colorClass = 'text-red-500';
+                }
+
+                html += `
+                    <div class="group relative bg-slate-700/50 hover:bg-slate-700 rounded px-3 py-2 flex items-center gap-3 transition-all min-w-[140px] justify-between border border-transparent hover:border-slate-600 cursor-pointer" onclick="setActiveSolve(${s.id})">
+                        <span class="text-xs text-slate-500 w-4 font-mono">${num}.</span>
+                        <span class="text-lg font-mono ${colorClass}">${displayTime}</span>
+                        <button onclick="deleteSolve(${s.id}, event)" class="opacity-0 group-hover:opacity-100 text-slate-500 hover:text-red-400 transition-opacity p-1">
+                            <i data-lucide="x" width="14"></i>
+                        </button>
+                        <div class="absolute bottom-full left-0 mb-2 w-max max-w-xs bg-slate-900 text-xs p-2 rounded border border-slate-700 hidden group-hover:block z-50 shadow-xl pointer-events-none">
+                            ${s.scramble}
+                        </div>
+                    </div>
+                `;
+            });
+            list.innerHTML = html;
+            lucide.createIcons();
+        }
+
+        function setActiveSolve(id) {
+            state.currentSolveId = id;
+            document.getElementById('postSolvePanel').classList.remove('hidden');
+            document.getElementById('postSolvePanel').classList.add('flex');
+            updatePostSolvePanel();
+        }
+
+        function updateStats() {
+            const solves = state.solves;
+            const ao5 = calculateAverage(solves, 5);
+            const ao12 = calculateAverage(solves, 12);
+            
+            const fmtAo5 = formatAvg(ao5);
+            const fmtAo12 = formatAvg(ao12);
+            
+            document.getElementById('floatAo5').textContent = fmtAo5;
+            document.getElementById('floatAo12').textContent = fmtAo12;
+            document.getElementById('solveCount').textContent = `${solves.length} Solves`;
+            
+            const validSolves = solves.filter(s => s.penalty !== 'dnf').map(s => s.time);
+            const best = validSolves.length > 0 ? Math.min(...validSolves) : 0;
+            const mean = validSolves.length > 0 ? validSolves.reduce((a, b) => a + b, 0) / validSolves.length : 0;
+            
+            document.getElementById('statBest').textContent = formatTime(best);
+            document.getElementById('statMean').textContent = formatTime(mean);
+        }
+
+        function updateSettingsUI() {
+            document.getElementById('inspectionBadge').classList.toggle('hidden', !state.settings.useInspection);
+            document.getElementById('btBadge').classList.toggle('hidden', state.settings.timingMethod !== 'bluetooth');
+            document.getElementById('typingBadge').classList.toggle('hidden', state.settings.timingMethod !== 'typing');
+            document.getElementById('btConnectionArea').classList.toggle('hidden', state.settings.timingMethod !== 'bluetooth');
+            document.getElementById('timingMethodSelect').value = state.settings.timingMethod;
+
+            const inspBtn = document.getElementById('btnInspection');
+            const inspDot = inspBtn.firstElementChild;
+            if(state.settings.useInspection) {
+                inspBtn.classList.replace('bg-slate-600', 'bg-green-500');
+                inspDot.style.left = '28px'; 
+            } else {
+                inspBtn.classList.replace('bg-green-500', 'bg-slate-600');
+                inspDot.style.left = '4px';
+            }
+        }
+
+        // --- Actions ---
+        function toggleSettings(show) {
+            const modal = document.getElementById('settingsModal');
+            if (show) modal.classList.remove('hidden');
+            else modal.classList.add('hidden');
+            if(show) setTimeout(() => lucide.createIcons(), 10);
+        }
+
+        function toggleInspection() {
+            state.settings.useInspection = !state.settings.useInspection;
+            saveData();
+            updateUI();
+        }
+
+        function changeTimingMethod(val) {
+            state.settings.timingMethod = val;
+            saveData();
+            updateUI();
+        }
+
+        function clearSession() {
+            if(confirm("Clear session history?")) {
+                state.solves = [];
+                state.time = 0;
+                state.status = 'idle';
+                state.scramble = generateScramble();
+                state.currentSolveId = null;
+                document.getElementById('postSolvePanel').classList.add('hidden');
+                document.getElementById('postSolvePanel').classList.remove('flex');
+                updateTimerDisplay(0);
+                saveData();
+                updateUI();
+            }
+        }
+
+        function deleteSolve(id, e) {
+            e.stopPropagation();
+            if(confirm("Delete this solve?")) {
+                state.solves = state.solves.filter(s => s.id !== id);
+                if (state.currentSolveId === id) {
+                     state.currentSolveId = null;
+                     document.getElementById('postSolvePanel').classList.add('hidden');
+                     document.getElementById('postSolvePanel').classList.remove('flex');
+                }
+                saveData();
+                updateUI();
+            }
+        }
+
+        // --- Helpers ---
+        function formatTime(ms) {
+            if (ms === 0) return "0.00";
+            const minutes = Math.floor(ms / 60000);
+            const seconds = Math.floor((ms % 60000) / 1000);
+            const centiseconds = Math.floor((ms % 1000) / 10);
+            const sStr = seconds < 10 && minutes > 0 ? `0${seconds}` : `${seconds}`;
+            const csStr = centiseconds < 10 ? `0${centiseconds}` : `${centiseconds}`;
+            return minutes > 0 ? `${minutes}:${sStr}.${csStr}` : `${sStr}.${csStr}`;
+        }
+        
+        function formatAvg(val) {
+             if (val === 'DNF') return 'DNF';
+             if (!val) return '-.--';
+             return formatTime(val);
+        }
+
+        function calculateAverage(allSolves, count) {
+            if (allSolves.length < count) return null;
+            const recent = allSolves.slice(0, count);
+            const values = recent.map(s => s.penalty === 'dnf' ? Infinity : s.time);
+            const sorted = [...values].sort((a, b) => a - b);
+            const trimmed = sorted.slice(1, count - 1);
+            if (trimmed.includes(Infinity)) return 'DNF';
+            const sum = trimmed.reduce((a, b) => a + b, 0);
+            return sum / (count - 2);
+        }
+
+        function generateScramble() {
+            const moves = ["U", "D", "L", "R", "F", "B"];
+            const suffixes = ["", "'", "2"];
+            let scramble = [];
+            let lastMove = -1, secondLastMove = -1;
+            for (let i = 0; i < 20; i++) {
+                let moveIdx;
+                do { moveIdx = Math.floor(Math.random() * moves.length); } 
+                while (moveIdx === lastMove || (moveIdx === secondLastMove && isOpposite(moveIdx, lastMove)));
+                scramble.push(moves[moveIdx] + suffixes[Math.floor(Math.random() * 3)]);
+                secondLastMove = lastMove;
+                lastMove = moveIdx;
+            }
+            return scramble.join(" ");
+        }
+
+        function isOpposite(m1, m2) { return Math.floor(m1 / 2) === Math.floor(m2 / 2); }
+        function generateNewScramble() { state.scramble = generateScramble(); updateUI(); }
+        
+        function saveData() {
+            localStorage.setItem('cubetimer_solves', JSON.stringify(state.solves));
+            localStorage.setItem('cubetimer_settings', JSON.stringify(state.settings));
+        }
+
+        function loadData() {
+            try {
+                const s = localStorage.getItem('cubetimer_solves');
+                if(s) state.solves = JSON.parse(s);
+                const st = localStorage.getItem('cubetimer_settings');
+                if(st) state.settings = JSON.parse(st);
+            } catch(e) { console.error(e); }
+        }
+
+        // --- Event Listeners ---
+        window.addEventListener('keydown', (e) => {
+            if (state.settings.timingMethod === 'typing') return;
+            if ((e.code === 'Space' || e.key === ' ') && !e.repeat) {
+                e.preventDefault();
+                handleTimerStartSignal();
+            }
+        });
+
+        window.addEventListener('keyup', (e) => {
+            if (state.settings.timingMethod === 'typing') return;
+            if (e.code === 'Space' || e.key === ' ') {
+                handleTimerStopSignal();
+            }
+        });
+
+        const touchZone = document.getElementById('touchZone');
+        
+        // Touch events
+        touchZone.addEventListener('touchstart', (e) => {
+            if (state.settings.timingMethod === 'typing') return;
+            if (e.target.closest('button') || e.target.closest('input')) return;
+            // Prevent default to avoid scrolling/zooming while touching
+            e.preventDefault(); 
+            handleTimerStartSignal();
+        });
+        touchZone.addEventListener('touchend', (e) => {
+            if (state.settings.timingMethod === 'typing') return;
+            if (e.target.closest('button') || e.target.closest('input')) return;
+            handleTimerStopSignal();
+        });
+
+        // Mouse events (for desktop click fallback)
+        touchZone.addEventListener('mousedown', (e) => {
+            if (state.settings.timingMethod === 'typing') return;
+            if (e.target.closest('button') || e.target.closest('input')) return;
+            // Only trigger on Left Click (button 0)
+            if (e.button === 0) {
+                handleTimerStartSignal();
+            }
+        });
+        
+        touchZone.addEventListener('mouseup', (e) => {
+             if (state.settings.timingMethod === 'typing') return;
+            if (e.target.closest('button') || e.target.closest('input')) return;
+            if (e.button === 0) {
+                handleTimerStopSignal();
+            }
+        });
+
+    </script>
+</body>
+</html>
